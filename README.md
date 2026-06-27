@@ -45,3 +45,10 @@ Dieses ESP32-Gateway wird zwischen die Pylontech-Akkus und den Wechselrichter ge
 ## 🤝 Beta-Tester gesucht!
 Du hast einen Deye, Growatt oder ähnlichen Wechselrichter und Pylontech-Akkus? Du bist genervt vom High-Voltage-Alarm? 
 Lade den Code herunter, teste ihn (bitte unter Beobachtung) und gib Feedback in den **Issues**! Jeder Erfahrungsbericht hilft, den Code zur finalen Dauerlösung für die Community zu machen.
+
+## ⚙️ Für Entwickler & Tester (Quick Setup)
+Das Projekt richtet sich aktuell an erfahrene Nutzer. Eine Schritt-für-Schritt-Anleitung für Anfänger folgt nach der Beta-Phase.
+* **Plattform:** ESP32 (Kompiliert mit Arduino IDE)
+* **Benötigte Bibliotheken:** `WiFiManager`, `PubSubClient` (Rest sind Standard-ESP32-Libs)
+* **Hardware-Pins (RS485/Serial2):** RX = 18, TX = 17, DE/RE = 21
+* **CAN-Bus:** Standard TWAI (Pins 15 & 16)
