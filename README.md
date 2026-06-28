@@ -52,3 +52,4 @@ Das Projekt richtet sich aktuell an erfahrene Nutzer. Eine Schritt-für-Schritt-
 * **Benötigte Bibliotheken:** `WiFiManager`, `PubSubClient` (Rest sind Standard-ESP32-Libs)
 * **Hardware-Pins (RS485/Serial2):** RX = 18, TX = 17, DE/RE = 21
 * **CAN-Bus:** Standard TWAI (Pins 15 & 16)
+* Wichtig: Bitte ladet alle 6 Dateien herunter und speichert sie im selben Ordner, damit der Limiter in der Arduino IDE richtig funktioniert!
