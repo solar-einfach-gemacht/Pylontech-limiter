@@ -48,7 +48,7 @@ Lade den Code herunter, teste ihn (bitte unter Beobachtung) und gib Feedback in 
 
 ## ⚙️ Für Entwickler & Tester (Quick Setup)
 Das Projekt richtet sich aktuell an erfahrene Nutzer. Eine Schritt-für-Schritt-Anleitung für Anfänger folgt nach der Beta-Phase.
-* **Plattform:** ESP32 (Kompiliert mit Arduino IDE)
+* **Plattform:** Waveshare ESP32-S3-RS485-CAN (Kompiliert mit Arduino IDE)
 * **Benötigte Bibliotheken:** `WiFiManager`, `PubSubClient` (Rest sind Standard-ESP32-Libs)
 * **Hardware-Pins (RS485/Serial2):** RX = 18, TX = 17, DE/RE = 21
 * **CAN-Bus:** Standard TWAI (Pins 15 & 16)
