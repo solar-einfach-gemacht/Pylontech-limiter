@@ -19,7 +19,6 @@ void initCanBus() {
 }
 
 void sendVictronCanFrames() {
-    // HIER IST DER LEBENSRETTENDE FIX: = {0} löscht den Stack-Müll!
     twai_message_t msg = {0};
     msg.extd = 0; 
     msg.rtr = 0;
@@ -37,7 +36,6 @@ void sendVictronCanFrames() {
     msg.identifier = 0x351;
     msg.data_length_code = 8;
     
-    // FIX: Die sichere Embedded-Rundung (+ 0.5) ohne math.h!
     uint16_t cvl_out = (uint16_t)((calculatedCVL * 10.0) + 0.5); 
     int16_t  ccl_out = (int16_t)((calculatedCCL * 10.0) + 0.5);
     int16_t  dcl_out = (int16_t)((calculatedDCL * 10.0) + 0.5); 
@@ -91,14 +89,36 @@ void sendVictronCanFrames() {
         twai_transmit(&msg, pdMS_TO_TICKS(5));
 
         // =========================================================================
-        // FRAME 4: PYLONTECH ALARM STATUS (0x359)
+        // FRAME 4: PYLONTECH ALARM STATUS (0x359) - V1.3 Protocol (Protection Bytes)
         // =========================================================================
         msg.identifier = 0x359;
         msg.data_length_code = 7;
-        msg.data[0] = 0x00; 
-        msg.data[1] = 0x00;
-        msg.data[2] = 0x00;
-        msg.data[3] = 0x00; 
+        
+        uint8_t protection1 = 0;  // Byte 0: Harte Schutzabschaltung Teil 1
+        uint8_t protection2 = 0;  // Byte 1: Harte Schutzabschaltung Teil 2
+
+        for (int i = 0; i < 16; i++) {
+            if (bmsRack[i].isConnected) {
+                if (bmsRack[i].almCellVoltageHigh)  protection1 |= 0x08; // Bit 3: Over Voltage
+                if (bmsRack[i].almCellVoltageLow)   protection1 |= 0x10; // Bit 4: Under Voltage
+                if (bmsRack[i].almTemperatureHigh)  protection1 |= 0x20; // Bit 5: Over Temperature
+                if (bmsRack[i].almTemperatureLow)   protection1 |= 0x40; // Bit 6: Under Temperature
+                if (bmsRack[i].almDischargeCurrent) protection1 |= 0x80; // Bit 7: Discharge Overcurrent
+                
+                if (bmsRack[i].almChargeCurrent)    protection2 |= 0x40; // Bit 6: Charge Overcurrent
+                if (bmsRack[i].almModuleVoltage)    protection2 |= 0x08; // Bit 3: Generischer Modul-Fehler
+            }
+        }
+
+        // ABSOLUTER FAIL-SAFE: Wenn gar kein Akku antwortet, Systemfehler an Wechselrichter funken
+        if (totalRackData.activeBatteries == 0) {
+            protection2 |= 0x80; // Bit 7: System error
+        }
+
+        msg.data[0] = protection1;
+        msg.data[1] = protection2;
+        msg.data[2] = 0x00;  // Alarm/Warning (leer gelassen, Protection reicht)
+        msg.data[3] = 0x00;  // Alarm/Warning (leer gelassen)
         
         int packs = totalRackData.activeBatteries;
         if (packs <= 0) packs = 2; 
@@ -112,7 +132,19 @@ void sendVictronCanFrames() {
         // =========================================================================
         msg.identifier = 0x35C;
         msg.data_length_code = 2;
-        msg.data[0] = 0xC0;
+        
+        uint8_t flags = 0x00;
+        
+        // 1. Basis-Erlaubnis vom ECHTEN Pylontech BMS holen
+        if (totalRackData.rackChargeEnable)    flags |= 0x80; // Bit 7 (Laden erlaubt)
+        if (totalRackData.rackDischargeEnable) flags |= 0x40; // Bit 6 (Entladen erlaubt)
+        
+        // 2. Deine eigene Limiter-Hysterese überschreibt das BMS!
+        if (cellProtectionActive || chargeBlockedByTarget || totalRackData.activeBatteries == 0) {
+            flags &= ~0x80; // Löscht Bit 7 (Laden verboten!)
+        }
+        
+        msg.data[0] = flags;
         msg.data[1] = 0x00;
         twai_transmit(&msg, pdMS_TO_TICKS(5));
 
