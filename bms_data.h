@@ -5,9 +5,9 @@
 
 struct BmsData {
   bool isConnected = false;
-  unsigned long lastUpdate = 0; // NEU: Zeitstempel für den Watchdog
+  unsigned long lastUpdate = 0; 
   String modelName = "Unbekannt";
-  float designCapacity = 50.0; // Standard für US2000
+  float designCapacity = 50.0; 
   int cellCount = 15;
   float cellVoltages[16] = {0.0};
   float tempMin = 0.0;
@@ -21,6 +21,23 @@ struct BmsData {
   float hardwareDcLimit = 25.0;
   float bmsCcLimit = 25.0;
   float bmsDcLimit = 25.0;
+
+  // NEU: Charge/Discharge-Steuerbits aus 0x92 Status-Byte
+  bool chargeEnable           = true;
+  bool dischargeEnable        = true;
+  bool chargeImmediatelySOC05 = false;
+  bool chargeImmediatelySOC09 = false;
+  bool chargeFullRequest      = false;
+
+  // NEU: Alarme aus 0x44 (pro Pack)
+  bool almCellVoltageLow      = false;
+  bool almCellVoltageHigh     = false;
+  bool almTemperatureLow      = false;
+  bool almTemperatureHigh     = false;
+  bool almChargeCurrent       = false;
+  bool almModuleVoltage       = false;
+  bool almDischargeCurrent    = false;
+  bool alarmActive            = false; 
 };
 
 struct RackTotal {
@@ -38,12 +55,17 @@ struct RackTotal {
   float rackHardwareDcLimitSum = 0.0;
   float rackBmsCcLimitSum = 0.0;
   float rackBmsDcLimitSum = 0.0;
+
+  // NEU: Rack-weite Aggregation für CAN-Ausgabe
+  bool rackChargeEnable    = true;   // AND über alle Packs
+  bool rackDischargeEnable = true;   // AND über alle Packs
+  bool rackAlarmActive     = false;  // OR über alle Packs
 };
 
 struct Settings {
   float maxVoltageLimit = 52.2;
   int maxCurrentPercent = 100;
-  int packCount = 2; // NEU: Anzahl der angeschlossenen Akkus
+  int packCount = 2; 
 };
 
 #ifdef MAIN_PROGRAM
