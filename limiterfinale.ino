@@ -16,6 +16,7 @@ extern void sendVictronCanFrames();
 extern bool parseManufacturerInfo(uint8_t adr, String res);
 extern bool parseAnalogData(uint8_t adr, String res);
 extern bool parseChargeManagement(uint8_t adr, String res);
+extern bool parseAlarmInfo(uint8_t adr, String res); // NEU
 extern void calculateRackTotals();
 
 extern void initCommunication();
@@ -81,14 +82,12 @@ void TaskBatteryLoop(void * pvParameters) {
   unsigned long lastDiagOut = 0;
 
   for(;;) {
-    // Sichere die Anzahl der Durchläufe (1 bis max 16)
     int maxPacks = userSettings.packCount;
     if (maxPacks < 1) maxPacks = 1;
     if (maxPacks > 16) maxPacks = 16;
     
-    // Zielgerichtete Schleife NUR für die konfigurierten Akkus
     for(int i = 0; i < maxPacks; i++) {
-        uint8_t adr = 2 + i; // Adressen starten bei 0x02
+        uint8_t adr = 2 + i; 
         char devIdHex[3];
         snprintf(devIdHex, sizeof(devIdHex), "%02X", adr);
         String infoStr = String(devIdHex);
@@ -108,6 +107,11 @@ void TaskBatteryLoop(void * pvParameters) {
         // 3. Management Info abfragen (Immer)
         sendBmsCommandRaw(buildFrame(adr, 0x92, infoStr));
         parseChargeManagement(adr, readBmsResponse());
+        vTaskDelay(pdMS_TO_TICKS(40));
+
+        // 4. Alarminfo abfragen (Immer) - NEU!
+        sendBmsCommandRaw(buildFrame(adr, 0x44, infoStr));
+        parseAlarmInfo(adr, readBmsResponse());
         vTaskDelay(pdMS_TO_TICKS(40));
     }
 
