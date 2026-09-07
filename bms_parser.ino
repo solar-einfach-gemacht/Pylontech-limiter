@@ -109,6 +109,7 @@ bool parseAnalogData(uint8_t adr, String res) {
         if(bmsRack[bmsIdx].bmsCcLimit == 25.0) { bmsRack[bmsIdx].bmsCcLimit = 80.0; bmsRack[bmsIdx].bmsDcLimit = 80.0; }
       }
 
+      // Fallback Berechnung (wird von 0x61 überschrieben, falls Firmware es unterstützt)
       bmsRack[bmsIdx].soc = ((float)remainCapRaw / (float)totalCapRaw) * 100.0;
       float calcSoh = (reportedAh / bmsRack[bmsIdx].designCapacity) * 100.0;
       bmsRack[bmsIdx].soh = (calcSoh > 100.0) ? 100.0 : calcSoh;
@@ -126,7 +127,7 @@ bool parseChargeManagement(uint8_t adr, String res) {
   if (basePos == -1) return false;
   
   int dataStart = basePos + 8;
-  if (dataStart + 20 > (int)res.length()) return false; // +20 wegen Statusbyte
+  if (dataStart + 20 > (int)res.length()) return false; 
   int bmsIdx = adr - 2;
 
   if (xSemaphoreTake(bmsMutex, pdMS_TO_TICKS(50)) == pdTRUE) {
@@ -146,13 +147,12 @@ bool parseChargeManagement(uint8_t adr, String res) {
       }
     }
 
-    // NEU: Statusbyte (Charge Enable) auswerten
     uint8_t statusByte = (uint8_t) fhemSubstrHex(res, dataStart + 18, 2);
-    bmsRack[bmsIdx].chargeEnable           = statusByte & 0x80; // Bit 7
-    bmsRack[bmsIdx].dischargeEnable        = statusByte & 0x40; // Bit 6
-    bmsRack[bmsIdx].chargeImmediatelySOC05 = statusByte & 0x20; // Bit 5
-    bmsRack[bmsIdx].chargeImmediatelySOC09 = statusByte & 0x10; // Bit 4
-    bmsRack[bmsIdx].chargeFullRequest      = statusByte & 0x08; // Bit 3
+    bmsRack[bmsIdx].chargeEnable           = statusByte & 0x80; 
+    bmsRack[bmsIdx].dischargeEnable        = statusByte & 0x40; 
+    bmsRack[bmsIdx].chargeImmediatelySOC05 = statusByte & 0x20; 
+    bmsRack[bmsIdx].chargeImmediatelySOC09 = statusByte & 0x10; 
+    bmsRack[bmsIdx].chargeFullRequest      = statusByte & 0x08; 
 
     xSemaphoreGive(bmsMutex);
     return true;
@@ -216,7 +216,37 @@ bool parseAlarmInfo(uint8_t adr, String res) {
   return false;
 }
 
-// 4. GESAMT-LOGIK BERECHNEN (RACK TOTALS)
+// 4. NATIVEN SOC & SOH PARSEN (CID61) - Überschreibt 0x42 Berechnungen
+bool parseSystemAnalogData(uint8_t adr, String res) {
+  int basePos = res.indexOf("4600"); 
+  if (basePos == -1) return false;
+  
+  int dataStart = basePos + 8;
+  // Sicherheitscheck: Frame muss lang genug sein für SOC (pos 8) und SOH (pos 18)
+  if (dataStart + 20 > (int)res.length()) return false; 
+  
+  int bmsIdx = adr - 2;
+
+  if (xSemaphoreTake(bmsMutex, pdMS_TO_TICKS(50)) == pdTRUE) {
+    // Byte 4 (Index 8 in Hex-String): Echter SOC
+    long socRaw = fhemSubstrHex(res, dataStart + 8, 2);
+    // Byte 9 (Index 18 in Hex-String): Echter SOH
+    long sohRaw = fhemSubstrHex(res, dataStart + 18, 2);
+    
+    if (socRaw >= 0 && socRaw <= 100) {
+        bmsRack[bmsIdx].soc = (float)socRaw;
+    }
+    if (sohRaw > 0 && sohRaw <= 100) {
+        bmsRack[bmsIdx].soh = (float)sohRaw;
+    }
+
+    xSemaphoreGive(bmsMutex);
+    return true;
+  }
+  return false;
+}
+
+// 5. GESAMT-LOGIK BERECHNEN (RACK TOTALS)
 void calculateRackTotals() {
   if (xSemaphoreTake(bmsMutex, pdMS_TO_TICKS(50)) == pdTRUE) {
     int count = 0;
@@ -272,9 +302,9 @@ void calculateRackTotals() {
       totalRackData.minCellVoltage = 0.0; totalRackData.rackHardwareCcLimitSum = 0.0;
       totalRackData.rackHardwareDcLimitSum = 0.0; totalRackData.rackBmsCcLimitSum = 0.0; totalRackData.rackBmsDcLimitSum = 0.0;
       
-      totalRackData.rackChargeEnable    = false;   // Fail-Safe: Kein Pack online -> Laden verboten
+      totalRackData.rackChargeEnable    = false;   
       totalRackData.rackDischargeEnable = false;
-      totalRackData.rackAlarmActive     = true;    // Fail-Safe: Als Alarm werten
+      totalRackData.rackAlarmActive     = true;    
     }
     xSemaphoreGive(bmsMutex);
   }
