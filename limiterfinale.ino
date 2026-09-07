@@ -16,7 +16,8 @@ extern void sendVictronCanFrames();
 extern bool parseManufacturerInfo(uint8_t adr, String res);
 extern bool parseAnalogData(uint8_t adr, String res);
 extern bool parseChargeManagement(uint8_t adr, String res);
-extern bool parseAlarmInfo(uint8_t adr, String res); // NEU
+extern bool parseAlarmInfo(uint8_t adr, String res); 
+extern bool parseSystemAnalogData(uint8_t adr, String res); // NEU
 extern void calculateRackTotals();
 
 extern void initCommunication();
@@ -109,9 +110,14 @@ void TaskBatteryLoop(void * pvParameters) {
         parseChargeManagement(adr, readBmsResponse());
         vTaskDelay(pdMS_TO_TICKS(40));
 
-        // 4. Alarminfo abfragen (Immer) - NEU!
+        // 4. Alarminfo abfragen (Immer)
         sendBmsCommandRaw(buildFrame(adr, 0x44, infoStr));
         parseAlarmInfo(adr, readBmsResponse());
+        vTaskDelay(pdMS_TO_TICKS(40));
+
+        // 5. Nativer SOC & SOH auslesen (Immer)
+        sendBmsCommandRaw(buildFrame(adr, 0x61, infoStr));
+        parseSystemAnalogData(adr, readBmsResponse());
         vTaskDelay(pdMS_TO_TICKS(40));
     }
 
