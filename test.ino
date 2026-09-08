@@ -32,36 +32,6 @@ String buildFrame(uint8_t address, uint8_t cid2, const String& info = "") {
     return String("~") + frame + buf + "\r";
 }
 
-void sendCommandAndPrint(uint8_t cid2) {
-    String cmd = buildFrame(0x02, cid2, "02"); 
-    
-    while(Serial2.available()) { Serial2.read(); }
-    
-    digitalWrite(DE_RE_PIN, HIGH);
-    delay(2);
-    Serial2.print(cmd);
-    Serial2.flush();
-    digitalWrite(DE_RE_PIN, LOW);
-    
-    Serial.printf("\n--- Sende Kommando 0x%02X ---\n", cid2);
-    
-    unsigned long start = millis();
-    String res = "";
-    while(millis() - start < 500) {
-        while(Serial2.available()) {
-            res += (char)Serial2.read();
-        }
-        delay(1);
-    }
-    
-    if (res.length() > 0) {
-        Serial.print("Antwort: "); 
-        Serial.println(res);
-    } else {
-        Serial.println("Antwort: [KEINE ANTWORT / TIMEOUT / KOMMANDO UNBEKANNT]");
-    }
-}
-
 void setup() {
     Serial.begin(115200);
     pinMode(DE_RE_PIN, OUTPUT);
@@ -69,24 +39,48 @@ void setup() {
     Serial2.begin(115200, SERIAL_8N1, RX_PIN, TX_PIN);
     
     delay(3000);
-    Serial.println("\n========================================");
-    Serial.println("STARTE PYLONTECH 0x6X PROTOKOLL SCAN...");
-    Serial.println("========================================");
+    Serial.println(F("\n=========================================="));
+    Serial.println(F(" PYLONTECH 0x61 SLAVE-TESTER "));
+    Serial.println(F("=========================================="));
 }
 
 void loop() {
-    // Referenz (damit wir sehen, dass die Kommunikation generell steht)
-    sendCommandAndPrint(0x42); 
-    delay(1000);
+    // Schleife über Master (0x02) und Slaves 1-3 (0x03, 0x04, 0x05)
+    for (uint8_t addr = 0x02; addr <= 0x05; addr++) {
+        char devIdHex[3];
+        snprintf(devIdHex, sizeof(devIdHex), "%02X", addr);
+        String infoStr = String(devIdHex);
+
+        String cmd = buildFrame(addr, 0x61, infoStr);
+        
+        while(Serial2.available()) { Serial2.read(); }
+        
+        digitalWrite(DE_RE_PIN, HIGH);
+        delay(2);
+        Serial2.print(cmd);
+        Serial2.flush();
+        digitalWrite(DE_RE_PIN, LOW);
+        
+        Serial.printf("\n--- Frage 0x61 von Adresse 0x%02X ab ---\n", addr);
+        
+        unsigned long start = millis();
+        String res = "";
+        while(millis() - start < 150) {
+            while(Serial2.available()) {
+                res += (char)Serial2.read();
+            }
+            delay(1);
+        }
+        
+        if (res.length() > 0) {
+            Serial.println("Antwort: " + res);
+        } else {
+            Serial.println("Antwort: [TIMEOUT / KEIN AKKU UNTER DIESER ADRESSE]");
+        }
+        
+        delay(1000); // Kurze Atempause für den Bus
+    }
     
-    // Die neuen, heißen Kandidaten
-    sendCommandAndPrint(0x61); // Get System Analog Data
-    delay(1000);
-    sendCommandAndPrint(0x62); // Get System Alarm Info
-    delay(1000);
-    sendCommandAndPrint(0x63); // Get System Charge Dischargement Info
-    delay(1000);
-    
-    Serial.println("\nScan-Durchlauf beendet. Warte 10 Sekunden...");
+    Serial.println(F("\nScan beendet. Nächster Durchlauf in 10 Sekunden..."));
     delay(10000);
 }
