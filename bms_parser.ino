@@ -109,10 +109,13 @@ bool parseAnalogData(uint8_t adr, String res) {
         if(bmsRack[bmsIdx].bmsCcLimit == 25.0) { bmsRack[bmsIdx].bmsCcLimit = 80.0; bmsRack[bmsIdx].bmsDcLimit = 80.0; }
       }
 
-      // Fallback Berechnung (wird von 0x61 überschrieben, falls Firmware es unterstützt)
       bmsRack[bmsIdx].soc = ((float)remainCapRaw / (float)totalCapRaw) * 100.0;
-      float calcSoh = (reportedAh / bmsRack[bmsIdx].designCapacity) * 100.0;
-      bmsRack[bmsIdx].soh = (calcSoh > 100.0) ? 100.0 : calcSoh;
+      
+      // NEU: Berechne den 0x42-SOH nur, wenn 0x61 diesen Akku nicht verarbeitet hat
+      if (!bmsRack[bmsIdx].hasNativeSoh) {
+        float calcSoh = (reportedAh / bmsRack[bmsIdx].designCapacity) * 100.0;
+        bmsRack[bmsIdx].soh = (calcSoh > 100.0) ? 100.0 : calcSoh;
+      }
     }
 
     xSemaphoreGive(bmsMutex);
@@ -216,21 +219,18 @@ bool parseAlarmInfo(uint8_t adr, String res) {
   return false;
 }
 
-// 4. NATIVEN SOC & SOH PARSEN (CID61) - Überschreibt 0x42 Berechnungen
+// 4. NATIVEN SOC & SOH PARSEN (CID61) - Setzt Flag gegen Flackern
 bool parseSystemAnalogData(uint8_t adr, String res) {
   int basePos = res.indexOf("4600"); 
   if (basePos == -1) return false;
   
   int dataStart = basePos + 8;
-  // Sicherheitscheck: Frame muss lang genug sein für SOC (pos 8) und SOH (pos 18)
   if (dataStart + 20 > (int)res.length()) return false; 
   
   int bmsIdx = adr - 2;
 
   if (xSemaphoreTake(bmsMutex, pdMS_TO_TICKS(50)) == pdTRUE) {
-    // Byte 4 (Index 8 in Hex-String): Echter SOC
     long socRaw = fhemSubstrHex(res, dataStart + 8, 2);
-    // Byte 9 (Index 18 in Hex-String): Echter SOH
     long sohRaw = fhemSubstrHex(res, dataStart + 18, 2);
     
     if (socRaw >= 0 && socRaw <= 100) {
@@ -238,6 +238,7 @@ bool parseSystemAnalogData(uint8_t adr, String res) {
     }
     if (sohRaw > 0 && sohRaw <= 100) {
         bmsRack[bmsIdx].soh = (float)sohRaw;
+        bmsRack[bmsIdx].hasNativeSoh = true; // NEU: 0x42 Fallback ab jetzt blockieren
     }
 
     xSemaphoreGive(bmsMutex);
@@ -264,7 +265,14 @@ void calculateRackTotals() {
       if (bmsRack[i].isConnected) {
         count++;
         vSum += bmsRack[i].totalVoltage; cSum += bmsRack[i].totalCurrent;
-        socSum += bmsRack[i].soc; sohSum += bmsRack[i].soh;
+        socSum += bmsRack[i].soc; 
+        
+        // NEU: Wenn der Master echte SOH-Werte liefert, nehmen wir diese als System-Durchschnitt
+        if (i == 0 && bmsRack[i].hasNativeSoh) {
+           sohSum = bmsRack[i].soh * userSettings.packCount; // Master-Wert repraesentiert das ganze Rack
+        } else {
+           sohSum += bmsRack[i].soh;
+        }
         
         if (bmsRack[i].tempMax > tMax) tMax = bmsRack[i].tempMax;
         if (bmsRack[i].tempMin < tMin) tMin = bmsRack[i].tempMin;
@@ -278,7 +286,6 @@ void calculateRackTotals() {
         hwCcSum  += bmsRack[i].hardwareCcLimit; hwDcSum  += bmsRack[i].hardwareDcLimit;
         bmsCcSum += bmsRack[i].bmsCcLimit; bmsDcSum += bmsRack[i].bmsDcLimit;
 
-        // Alarm & Enable Aggregation (AND/OR Logik)
         if (!bmsRack[i].chargeEnable)    rcEnable = false;
         if (!bmsRack[i].dischargeEnable) rdEnable = false;
         if (bmsRack[i].alarmActive)      rAlarm   = true;
@@ -288,7 +295,15 @@ void calculateRackTotals() {
     totalRackData.activeBatteries = count;
     if (count > 0) {
       totalRackData.totalVoltage = vSum / count; totalRackData.totalCurrent = cSum;
-      totalRackData.averageSoc = socSum / count; totalRackData.averageSoh = sohSum / count;
+      totalRackData.averageSoc = socSum / count; 
+      
+      // SOH Durchschnitt korrekt berechnen
+      if (bmsRack[0].hasNativeSoh) {
+         totalRackData.averageSoh = bmsRack[0].soh; 
+      } else {
+         totalRackData.averageSoh = sohSum / count;
+      }
+      
       totalRackData.maxCellVoltage = maxV; totalRackData.minCellVoltage = minV;
       totalRackData.tempMax = tMax; totalRackData.tempMin = tMin;
       totalRackData.bmsMosfetTempMax = bmsTMax;
