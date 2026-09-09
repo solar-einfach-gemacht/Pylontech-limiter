@@ -17,19 +17,19 @@ struct BmsData {
   float totalCurrent = 0.0;
   float soc = 0.0;
   float soh = 100.0;
+  bool hasNativeSoh = false; // NEU: Merker fuer echten SOH
+
   float hardwareCcLimit = 25.0;
   float hardwareDcLimit = 25.0;
   float bmsCcLimit = 25.0;
   float bmsDcLimit = 25.0;
 
-  // NEU: Charge/Discharge-Steuerbits aus 0x92 Status-Byte
   bool chargeEnable           = true;
   bool dischargeEnable        = true;
   bool chargeImmediatelySOC05 = false;
   bool chargeImmediatelySOC09 = false;
   bool chargeFullRequest      = false;
 
-  // NEU: Alarme aus 0x44 (pro Pack)
   bool almCellVoltageLow      = false;
   bool almCellVoltageHigh     = false;
   bool almTemperatureLow      = false;
@@ -56,10 +56,9 @@ struct RackTotal {
   float rackBmsCcLimitSum = 0.0;
   float rackBmsDcLimitSum = 0.0;
 
-  // NEU: Rack-weite Aggregation für CAN-Ausgabe
-  bool rackChargeEnable    = true;   // AND über alle Packs
-  bool rackDischargeEnable = true;   // AND über alle Packs
-  bool rackAlarmActive     = false;  // OR über alle Packs
+  bool rackChargeEnable    = true;   
+  bool rackDischargeEnable = true;   
+  bool rackAlarmActive     = false;  
 };
 
 struct Settings {
