@@ -17,15 +17,12 @@ extern bool parseManufacturerInfo(uint8_t adr, String res);
 extern bool parseAnalogData(uint8_t adr, String res);
 extern bool parseChargeManagement(uint8_t adr, String res);
 extern bool parseAlarmInfo(uint8_t adr, String res); 
-extern bool parseSystemAnalogData(uint8_t adr, String res); // NEU
+extern bool parseSystemAnalogData(uint8_t adr, String res);
 extern void calculateRackTotals();
 
 extern void initCommunication();
 extern void processCommunication();
 
-// =========================================
-// FRAME BUILDER FÜR BELIEBIGE ADRESSEN
-// =========================================
 uint16_t calcChecksum(const String& frame) {
     uint32_t sum = 0;
     for (int i = 0; i < (int)frame.length(); i++) sum += (uint8_t)frame[i];
@@ -73,9 +70,6 @@ String readBmsResponse() {
     return res;
 }
 
-// =========================================
-// HAUPT-TASKS
-// =========================================
 void TaskBatteryLoop(void * pvParameters) {
   pinMode(DE_RE_PIN, OUTPUT);
   digitalWrite(DE_RE_PIN, LOW);
@@ -93,44 +87,40 @@ void TaskBatteryLoop(void * pvParameters) {
         snprintf(devIdHex, sizeof(devIdHex), "%02X", adr);
         String infoStr = String(devIdHex);
 
-        // 1. Modell abfragen (Einmalig)
+        // 1. Modell abfragen
         if (bmsRack[i].modelName == "Unbekannt") {
             sendBmsCommandRaw(buildFrame(adr, 0x51, infoStr));
             parseManufacturerInfo(adr, readBmsResponse());
             vTaskDelay(pdMS_TO_TICKS(40));
         }
 
-        // 2. Sensordaten abfragen (Immer)
+        // 2. Sensordaten abfragen (0x42)
         sendBmsCommandRaw(buildFrame(adr, 0x42, infoStr));
         parseAnalogData(adr, readBmsResponse());
         vTaskDelay(pdMS_TO_TICKS(40));
 
-        // 3. Management Info abfragen (Immer)
+        // 3. Management Info abfragen (0x92)
         sendBmsCommandRaw(buildFrame(adr, 0x92, infoStr));
         parseChargeManagement(adr, readBmsResponse());
         vTaskDelay(pdMS_TO_TICKS(40));
 
-        // 4. Alarminfo abfragen (Immer)
+        // 4. Alarminfo abfragen (0x44)
         sendBmsCommandRaw(buildFrame(adr, 0x44, infoStr));
         parseAlarmInfo(adr, readBmsResponse());
         vTaskDelay(pdMS_TO_TICKS(40));
 
-        // 5. Nativer SOC & SOH auslesen (Immer)
-        sendBmsCommandRaw(buildFrame(adr, 0x61, infoStr));
-        parseSystemAnalogData(adr, readBmsResponse());
-        vTaskDelay(pdMS_TO_TICKS(40));
+        // 5. Nativer SOC & SOH auslesen (0x61) - NEU: NUR BEIM MASTER (i == 0)
+        if (i == 0) {
+            sendBmsCommandRaw(buildFrame(adr, 0x61, infoStr));
+            parseSystemAnalogData(adr, readBmsResponse());
+            vTaskDelay(pdMS_TO_TICKS(40));
+        }
     }
 
-    // ==========================================
-    // PROZESSIERUNG & CAN AN VICTRON
-    // ==========================================
     calculateRackTotals();
     processHysteresisProtection();  
     sendVictronCanFrames();         
     
-    // ==========================================
-    // DIAGNOSE AUSGABE
-    // ==========================================
     if (millis() - lastDiagOut > 4000) { 
       lastDiagOut = millis();
       if (xSemaphoreTake(bmsMutex, pdMS_TO_TICKS(50)) == pdTRUE) {
