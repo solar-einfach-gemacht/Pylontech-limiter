@@ -34,85 +34,113 @@ bool parseManufacturerInfo(uint8_t adr, String res) {
   return false;
 }
 
-// 1. SENSORDATEN PARSEN (CID42) 
+// 1. SENSORDATEN PARSEN (CID42) - Puffer-Modus mit Spam-Schutz
 bool parseAnalogData(uint8_t adr, String res) {
   if (res.length() < 40) return false;
   int bmsIdx = adr - 2;
   if (bmsIdx < 0 || bmsIdx >= 16) return false;
 
+  int pos = 17; 
+  long cellCount = fhemSubstrHex(res, pos, 2); pos += 2;
+  if (cellCount < 10 || cellCount > 16) return false;
+  
+  float tempCells[16] = {0};
+  for (int i = 0; i < cellCount; i++) {
+    float v = fhemSubstrHex(res, pos, 4) / 1000.0; pos += 4;
+    if (v < 2.0 || v > 4.5) {
+      static unsigned long lastLog = 0;
+      if (millis() - lastLog > 1000) { // Max. 1 Log pro Sekunde
+          Serial.printf("[BMS] Frame korrupt! Pack %d Zelle %d = %.3f V -> verworfen\n", bmsIdx+1, i+1, v);
+          Serial.println(res); 
+          lastLog = millis();
+      }
+      return false; 
+    }
+    tempCells[i] = v;
+  }
+  
+  long tempCount = fhemSubstrHex(res, pos, 2); pos += 2;
+  if (tempCount < 1 || tempCount > 8) return false;
+  
+  float maxT = -100.0, minT = 100.0, mosfetT = 25.0;
+  int validTemps = 0;
+
+  for (int i = 0; i < tempCount; i++) {
+    long tRaw = fhemSubstrHex(res, pos, 4); pos += 4;
+    if (tRaw & 0x8000) tRaw = tRaw - 0x10000;
+    float tVal = (tRaw - 2731) / 10.0;
+
+    // Defekte oder ungenutzte Sensoren ignorieren, statt das Paket zu verwerfen
+    if (tVal < -50.0 || tVal > 150.0) continue;
+    validTemps++;
+
+    if (i == 0) {
+      mosfetT = tVal;
+    } else {
+      if (tVal > maxT) maxT = tVal;
+      if (tVal < minT) minT = tVal;
+    }
+  }
+  
+  // Wenn kein einziger Temperaturwert plausibel war, Paket verwerfen
+  if (validTemps == 0) return false; 
+  if (maxT < -90.0) { maxT = mosfetT; minT = mosfetT; } // Fallback, falls kein Zellsensor da ist
+
+  short sCurrent = (short)fhemSubstrHex(res, pos, 4); pos += 4;
+  float tCurrent = sCurrent / 10.0;
+  
+  float tVoltage = fhemSubstrHex(res, pos, 4) / 1000.0; pos += 4;
+  if (tVoltage < 40.0 || tVoltage > 60.0) return false; 
+
+  long remainCapRaw = fhemSubstrHex(res, pos, 4); pos += 4;
+  pos += 2; 
+  long totalCapRaw = fhemSubstrHex(res, pos, 4); pos += 4;
+  long cycleCount = fhemSubstrHex(res, pos, 4); pos += 4;
+  (void)cycleCount; // Compiler-Warnung unterdrücken
+
+  if (totalCapRaw == 65535 && (pos + 12 <= (int)res.length())) {
+    remainCapRaw = fhemSubstrHex(res, pos, 6); pos += 6;
+    totalCapRaw = fhemSubstrHex(res, pos, 6); pos += 6;
+  }
+
+  // --- SICHERE DATENÜBERNAHME INS LIVE-SYSTEM ---
   if (xSemaphoreTake(bmsMutex, pdMS_TO_TICKS(50)) == pdTRUE) {
-    bmsRack[bmsIdx].isConnected = true; 
+    bmsRack[bmsIdx].isConnected = true;    
     bmsRack[bmsIdx].lastUpdate = millis(); 
     
-    int pos = 17; 
-    long cellCount = fhemSubstrHex(res, pos, 2); pos += 2;
-    if (cellCount < 10 || cellCount > 16) { xSemaphoreGive(bmsMutex); return false; }
     bmsRack[bmsIdx].cellCount = cellCount;
-
     for (int i = 0; i < cellCount; i++) {
-      bmsRack[bmsIdx].cellVoltages[i] = fhemSubstrHex(res, pos, 4) / 1000.0; pos += 4;
+      bmsRack[bmsIdx].cellVoltages[i] = tempCells[i];
     }
     
-    long tempCount = fhemSubstrHex(res, pos, 2); pos += 2;
-    float maxT = -100.0, minT = 100.0;
+    bmsRack[bmsIdx].bmsMosfetTemp = mosfetT;
+    bmsRack[bmsIdx].tempMin = minT; 
+    bmsRack[bmsIdx].tempMax = maxT;
+    bmsRack[bmsIdx].totalCurrent = tCurrent;
+    bmsRack[bmsIdx].totalVoltage = tVoltage;
 
-    for (int i = 0; i < tempCount; i++) {
-      long tRaw = fhemSubstrHex(res, pos, 4); pos += 4;
-      if (tRaw & 0x8000) tRaw = tRaw - 0x10000;
-      float tVal = (tRaw - 2731) / 10.0;
-
-      if (i == 0) {
-        if (tVal > -40.0 && tVal < 120.0) bmsRack[bmsIdx].bmsMosfetTemp = tVal;
-        else bmsRack[bmsIdx].bmsMosfetTemp = 25.0;
-      } else {
-        if (tVal > maxT) maxT = tVal;
-        if (tVal < minT) minT = tVal;
-      }
-    }
-    
-    if (tempCount <= 1) { maxT = bmsRack[bmsIdx].bmsMosfetTemp; minT = bmsRack[bmsIdx].bmsMosfetTemp; }
-    bmsRack[bmsIdx].tempMin = minT; bmsRack[bmsIdx].tempMax = maxT;
-
-    short sCurrent = (short)fhemSubstrHex(res, pos, 4); pos += 4;
-    bmsRack[bmsIdx].totalCurrent = sCurrent / 10.0;
-    
-    bmsRack[bmsIdx].totalVoltage = fhemSubstrHex(res, pos, 4) / 1000.0; pos += 4;
-    long remainCapRaw = fhemSubstrHex(res, pos, 4); pos += 4;
-    pos += 2; 
-    long totalCapRaw = fhemSubstrHex(res, pos, 4); pos += 4;
-    long cycleCount = fhemSubstrHex(res, pos, 4); pos += 4;
-
-    if (totalCapRaw == 65535 && (pos + 12 <= (int)res.length())) {
-      remainCapRaw = fhemSubstrHex(res, pos, 6); pos += 6;
-      totalCapRaw = fhemSubstrHex(res, pos, 6); pos += 6;
-    }
-    
     if (totalCapRaw > 0) {
       float reportedAh = totalCapRaw / 1000.0;
 
+      // Kapazitätslimits setzen, ABER den echten Modellnamen (0x51) intakt lassen!
       if (reportedAh > 10.0 && reportedAh <= 56.0) {
-        bmsRack[bmsIdx].modelName = "US2000 Auto";
         bmsRack[bmsIdx].designCapacity = 50.0;
         bmsRack[bmsIdx].hardwareCcLimit = 25.0; bmsRack[bmsIdx].hardwareDcLimit = 25.0;
         if(bmsRack[bmsIdx].bmsCcLimit == 25.0) { bmsRack[bmsIdx].bmsCcLimit = 25.0; bmsRack[bmsIdx].bmsDcLimit = 25.0; }
       } 
       else if (reportedAh > 56.0 && reportedAh <= 85.0) {
-        bmsRack[bmsIdx].modelName = "US3000 Auto";
         bmsRack[bmsIdx].designCapacity = 74.0;
         bmsRack[bmsIdx].hardwareCcLimit = 37.0; bmsRack[bmsIdx].hardwareDcLimit = 37.0;
         if(bmsRack[bmsIdx].bmsCcLimit == 25.0) { bmsRack[bmsIdx].bmsCcLimit = 37.0; bmsRack[bmsIdx].bmsDcLimit = 37.0; }
       } 
       else if (reportedAh > 85.0) {
-        bmsRack[bmsIdx].modelName = "US5000 Auto";
         bmsRack[bmsIdx].designCapacity = 100.0;
         bmsRack[bmsIdx].hardwareCcLimit = 80.0; bmsRack[bmsIdx].hardwareDcLimit = 80.0;
         if(bmsRack[bmsIdx].bmsCcLimit == 25.0) { bmsRack[bmsIdx].bmsCcLimit = 80.0; bmsRack[bmsIdx].bmsDcLimit = 80.0; }
       }
 
-      bmsRack[bmsIdx].soc = ((float)remainCapRaw / (float)totalCapRaw) * 100.0;
-      
-      // NEU: Berechne den 0x42-SOH nur, wenn 0x61 diesen Akku nicht verarbeitet hat
       if (!bmsRack[bmsIdx].hasNativeSoh) {
+        bmsRack[bmsIdx].soc = ((float)remainCapRaw / (float)totalCapRaw) * 100.0;
         float calcSoh = (reportedAh / bmsRack[bmsIdx].designCapacity) * 100.0;
         bmsRack[bmsIdx].soh = (calcSoh > 100.0) ? 100.0 : calcSoh;
       }
@@ -219,7 +247,7 @@ bool parseAlarmInfo(uint8_t adr, String res) {
   return false;
 }
 
-// 4. NATIVEN SOC & SOH PARSEN (CID61) - Setzt Flag gegen Flackern
+// 4. NATIVEN SOC & SOH PARSEN (CID61)
 bool parseSystemAnalogData(uint8_t adr, String res) {
   int basePos = res.indexOf("4600"); 
   if (basePos == -1) return false;
@@ -238,7 +266,7 @@ bool parseSystemAnalogData(uint8_t adr, String res) {
     }
     if (sohRaw > 0 && sohRaw <= 100) {
         bmsRack[bmsIdx].soh = (float)sohRaw;
-        bmsRack[bmsIdx].hasNativeSoh = true; // NEU: 0x42 Fallback ab jetzt blockieren
+        bmsRack[bmsIdx].hasNativeSoh = true; 
     }
 
     xSemaphoreGive(bmsMutex);
@@ -267,10 +295,8 @@ void calculateRackTotals() {
         vSum += bmsRack[i].totalVoltage; cSum += bmsRack[i].totalCurrent;
         socSum += bmsRack[i].soc; 
         
-        // NEU: Wenn der Master echte SOH-Werte liefert, nehmen wir diese als System-Durchschnitt
-        if (i == 0 && bmsRack[i].hasNativeSoh) {
-           sohSum = bmsRack[i].soh * userSettings.packCount; // Master-Wert repraesentiert das ganze Rack
-        } else {
+        // Toter Code bereinigt: sohSum wird nur addiert, wenn der Master nicht übernimmt
+        if (!(i == 0 && bmsRack[i].hasNativeSoh)) {
            sohSum += bmsRack[i].soh;
         }
         
@@ -280,6 +306,7 @@ void calculateRackTotals() {
         
         for (int c = 0; c < bmsRack[i].cellCount; c++) {
           float cv = bmsRack[i].cellVoltages[c];
+          if (cv < 2.0 || cv > 4.5) continue; // Finales Sicherheitsnetz
           if (cv > maxV) maxV = cv;
           if (cv < minV) minV = cv;
         }
@@ -297,8 +324,7 @@ void calculateRackTotals() {
       totalRackData.totalVoltage = vSum / count; totalRackData.totalCurrent = cSum;
       totalRackData.averageSoc = socSum / count; 
       
-      // SOH Durchschnitt korrekt berechnen
-      if (bmsRack[0].hasNativeSoh) {
+      if (bmsRack[0].hasNativeSoh && bmsRack[0].isConnected) {
          totalRackData.averageSoh = bmsRack[0].soh; 
       } else {
          totalRackData.averageSoh = sohSum / count;
