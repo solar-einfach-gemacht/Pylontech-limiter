@@ -52,6 +52,7 @@ String buildFrame(uint8_t address, uint8_t cid2, const String& info = "") {
 }
 
 void sendBmsCommandRaw(String cmd) {
+  // Puffer vor der neuen Frage RADIKAL leeren, um Geister-Antworten zu killen
   while(Serial2.available()) { Serial2.read(); } 
   digitalWrite(DE_RE_PIN, HIGH);
   delay(2);
@@ -63,8 +64,15 @@ void sendBmsCommandRaw(String cmd) {
 String readBmsResponse() {
     String res = "";
     unsigned long start = millis();
-    while(millis() - start < 120) { 
-      while(Serial2.available()) { res += (char)Serial2.read(); } 
+    // Timeout auf 250ms verdoppelt, da 120ms für einige Akkus zu knapp sind
+    while(millis() - start < 250) { 
+      while(Serial2.available()) { 
+        char c = (char)Serial2.read();
+        res += c;
+        if (c == '\r') {
+            return res;
+        }
+      } 
       vTaskDelay(pdMS_TO_TICKS(1)); 
     }
     return res;
@@ -109,7 +117,7 @@ void TaskBatteryLoop(void * pvParameters) {
         parseAlarmInfo(adr, readBmsResponse());
         vTaskDelay(pdMS_TO_TICKS(40));
 
-        // 5. Nativer SOC & SOH auslesen (0x61) - NEU: NUR BEIM MASTER (i == 0)
+        // 5. Nativer SOC & SOH auslesen (0x61) - NUR BEIM MASTER (i == 0)
         if (i == 0) {
             sendBmsCommandRaw(buildFrame(adr, 0x61, infoStr));
             parseSystemAnalogData(adr, readBmsResponse());
