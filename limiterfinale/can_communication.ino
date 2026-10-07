@@ -89,42 +89,48 @@ void sendVictronCanFrames() {
         twai_transmit(&msg, pdMS_TO_TICKS(5));
 
         // =========================================================================
-        // FRAME 4: PYLONTECH ALARM STATUS (0x359) - V1.3 Protocol (Protection Bytes)
+        // FRAME 4: PYLONTECH ALARM STATUS (0x359) - V1.3 Protocol
         // =========================================================================
         msg.identifier = 0x359;
         msg.data_length_code = 7;
         
         uint8_t protection1 = 0;  // Byte 0: Harte Schutzabschaltung Teil 1
         uint8_t protection2 = 0;  // Byte 1: Harte Schutzabschaltung Teil 2
+        uint8_t alarm1 = 0;       // Byte 2: Warnungen Teil 1 (aktuell ungenutzt, aber vorbereitet)
+        uint8_t alarm2 = 0;       // Byte 3: Warnungen Teil 2 (aktuell ungenutzt)
 
         for (int i = 0; i < 16; i++) {
             if (bmsRack[i].isConnected) {
-                if (bmsRack[i].almCellVoltageHigh)  protection1 |= 0x08; // Bit 3: Over Voltage
-                if (bmsRack[i].almCellVoltageLow)   protection1 |= 0x10; // Bit 4: Under Voltage
-                if (bmsRack[i].almTemperatureHigh)  protection1 |= 0x20; // Bit 5: Over Temperature
-                if (bmsRack[i].almTemperatureLow)   protection1 |= 0x40; // Bit 6: Under Temperature
+                // Byte 0: Protection
+                if (bmsRack[i].almCellVoltageHigh)  protection1 |= 0x02; // Bit 1: Cell/Module Over Voltage
+                if (bmsRack[i].almCellVoltageLow)   protection1 |= 0x04; // Bit 2: Cell/Module Under Voltage
+                if (bmsRack[i].almTemperatureHigh)  protection1 |= 0x08; // Bit 3: Cell Over Temperature
+                if (bmsRack[i].almTemperatureLow)   protection1 |= 0x10; // Bit 4: Cell Under Temperature
                 if (bmsRack[i].almDischargeCurrent) protection1 |= 0x80; // Bit 7: Discharge Overcurrent
                 
-                if (bmsRack[i].almChargeCurrent)    protection2 |= 0x40; // Bit 6: Charge Overcurrent
-                if (bmsRack[i].almModuleVoltage)    protection2 |= 0x08; // Bit 3: Generischer Modul-Fehler
+                // Byte 1: Protection
+                if (bmsRack[i].almChargeCurrent)    protection2 |= 0x01; // Bit 0: Charge Overcurrent
+                // Generische Modulspannungswarnungen (almModuleVoltage) mappen wir vorerst nicht auf "System Error" (Bit 3), 
+                // da dies zu ungewollten Abschaltungen führen kann, wenn es kein echter Systemfehler ist.
             }
         }
 
-        // ABSOLUTER FAIL-SAFE: Wenn gar kein Akku antwortet, Systemfehler an Wechselrichter funken
+        // ABSOLUTER FAIL-SAFE: Wenn gar kein Akku antwortet, System Error an Wechselrichter funken
         if (totalRackData.activeBatteries == 0) {
-            protection2 |= 0x80; // Bit 7: System error
+            protection2 |= 0x08; // Byte 1, Bit 3: System Error
         }
 
         msg.data[0] = protection1;
         msg.data[1] = protection2;
-        msg.data[2] = 0x00;  // Alarm/Warning (leer gelassen, Protection reicht)
-        msg.data[3] = 0x00;  // Alarm/Warning (leer gelassen)
+        msg.data[2] = alarm1; // Alarm/Warning
+        msg.data[3] = alarm2; // Alarm/Warning
         
         int packs = totalRackData.activeBatteries;
-        if (packs <= 0) packs = 2; 
+        if (packs <= 0) packs = 2; // Fallback, damit der WR keinen Fehler wegen "0 Packs" wirft
         msg.data[4] = (uint8_t)packs;
-        msg.data[5] = 'P';
-        msg.data[6] = 'N';
+        msg.data[5] = 'P'; // 0x50
+        msg.data[6] = 'N'; // 0x4E
+        
         twai_transmit(&msg, pdMS_TO_TICKS(5));
 
         // =========================================================================
