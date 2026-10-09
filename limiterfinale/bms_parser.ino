@@ -417,3 +417,4 @@ void calculateRackTotals() {
     }
     xSemaphoreGive(bmsMutex);
   }
+}
