@@ -131,19 +131,45 @@ void TaskBatteryLoop(void * pvParameters) {
     
     if (millis() - lastDiagOut > 4000) { 
       lastDiagOut = millis();
+
+      // Werte nur KOPIEREN, solange der Mutex gehalten wird ...
+      bool dOk = false;
+      int   dActive = 0;
+      float dSoc = 0, dVolt = 0, dCur = 0, dMaxC = 0, dMinC = 0;
+      float dHwCc = 0, dHwDc = 0, dBmsCc = 0, dBmsDc = 0;
+      float dCvl = 0, dCcl = 0, dDcl = 0;
+
       if (xSemaphoreTake(bmsMutex, pdMS_TO_TICKS(50)) == pdTRUE) {
+        dActive = totalRackData.activeBatteries;
+        dSoc    = totalRackData.averageSoc;
+        dVolt   = totalRackData.totalVoltage;
+        dCur    = totalRackData.totalCurrent;
+        dMaxC   = totalRackData.maxCellVoltage;
+        dMinC   = totalRackData.minCellVoltage;
+        dHwCc   = totalRackData.rackHardwareCcLimitSum;
+        dHwDc   = totalRackData.rackHardwareDcLimitSum;
+        dBmsCc  = totalRackData.rackBmsCcLimitSum;
+        dBmsDc  = totalRackData.rackBmsDcLimitSum;
+        dCvl    = calculatedCVL;
+        dCcl    = calculatedCCL;
+        dDcl    = calculatedDCL;
+        xSemaphoreGive(bmsMutex);
+        dOk = true;
+      }
+
+      // ... und erst DANACH ausgeben. So kann ein haengender Serial-Port nie den Mutex blockieren.
+      if (dOk) {
         Serial.println(F("\n====================================================================="));
         Serial.println(F("                    RACK MASTER LIVE DETAIL-DIAGNOSE                  "));
         Serial.println(F("====================================================================="));
-        Serial.printf("Packs konfiguriert: %d | Packs online: %d | System-SOC: %.1f %%\n", maxPacks, totalRackData.activeBatteries, totalRackData.averageSoc);
-        Serial.printf("Spannung: %.2f V | Gesamtstrom: %.2f A\n", totalRackData.totalVoltage, totalRackData.totalCurrent);
-        Serial.printf("Zell-Max: %.3f V | Zell-Min: %.3f V | Delta: %.3f V\n", totalRackData.maxCellVoltage, totalRackData.minCellVoltage, (totalRackData.maxCellVoltage - totalRackData.minCellVoltage));
-        Serial.printf("Hardware-Basis    -> CCL-Max: %.1f A | DCL-Max: %.1f A\n", totalRackData.rackHardwareCcLimitSum, totalRackData.rackHardwareDcLimitSum);
-        Serial.printf("Pylontech (0x92)  -> CCL-Live: %.1f A | DCL-Live: %.1f A\n", totalRackData.rackBmsCcLimitSum, totalRackData.rackBmsDcLimitSum);
+        Serial.printf("Packs konfiguriert: %d | Packs online: %d | System-SOC: %.1f %%\n", maxPacks, dActive, dSoc);
+        Serial.printf("Spannung: %.2f V | Gesamtstrom: %.2f A\n", dVolt, dCur);
+        Serial.printf("Zell-Max: %.3f V | Zell-Min: %.3f V | Delta: %.3f V\n", dMaxC, dMinC, (dMaxC - dMinC));
+        Serial.printf("Hardware-Basis    -> CCL-Max: %.1f A | DCL-Max: %.1f A\n", dHwCc, dHwDc);
+        Serial.printf("Pylontech (0x92)  -> CCL-Live: %.1f A | DCL-Live: %.1f A\n", dBmsCc, dBmsDc);
         Serial.println(F("---------------------------------------------------------------------"));
-        Serial.printf("CAN OUT AN VICTRON-> CVL: %.1fV | CCL (Geregelt): %.1fA | DCL: %.1fA\n", calculatedCVL, calculatedCCL, calculatedDCL);
+        Serial.printf("CAN OUT AN VICTRON-> CVL: %.1fV | CCL (Geregelt): %.1fA | DCL: %.1fA\n", dCvl, dCcl, dDcl);
         Serial.println(F("=================================================================\n"));
-        xSemaphoreGive(bmsMutex);
       }
     }
     vTaskDelay(pdMS_TO_TICKS(150)); 
@@ -160,6 +186,7 @@ void TaskCommLoop(void * pvParameters) {
 
 void setup() {
   Serial.begin(115200);
+  Serial.setTxTimeoutMs(0);   // Serial blockiert nie, auch wenn kein Terminal/USB-Kabel mitliest
   delay(1000);
   Serial.println(F("=== SYSTEM START ==="));
   bmsMutex = xSemaphoreCreateMutex();
