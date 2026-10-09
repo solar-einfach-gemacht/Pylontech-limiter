@@ -356,6 +356,15 @@ void calculateRackTotals() {
       // Watchdog: Pack ohne gültigen Frame seit 10 s gilt als offline
       if (bmsRack[i].isConnected && (millis() - bmsRack[i].lastUpdate > 10000)) {
         bmsRack[i].isConnected = false;
+        // Alte Alarme loeschen, damit sie beim Wiederverbinden nicht kurz auftauchen
+        bmsRack[i].almCellVoltageLow   = false;
+        bmsRack[i].almCellVoltageHigh  = false;
+        bmsRack[i].almTemperatureLow   = false;
+        bmsRack[i].almTemperatureHigh  = false;
+        bmsRack[i].almChargeCurrent    = false;
+        bmsRack[i].almModuleVoltage    = false;
+        bmsRack[i].almDischargeCurrent = false;
+        bmsRack[i].alarmActive         = false;
       }
 
       if (bmsRack[i].isConnected) {
@@ -408,6 +417,12 @@ void calculateRackTotals() {
       totalRackData.rackDischargeEnable = rdEnable;
       totalRackData.rackAlarmActive     = rAlarm;
     } else {
+      // Kein Pack online: keine alten Messwerte stehen lassen
+      totalRackData.totalVoltage = 0.0; totalRackData.totalCurrent = 0.0;
+      totalRackData.averageSoc = 0.0;
+      totalRackData.maxCellVoltage = 0.0;
+      totalRackData.tempMax = 0.0; totalRackData.tempMin = 0.0;
+      totalRackData.bmsMosfetTempMax = 0.0;
       totalRackData.minCellVoltage = 0.0; totalRackData.rackHardwareCcLimitSum = 0.0;
       totalRackData.rackHardwareDcLimitSum = 0.0; totalRackData.rackBmsCcLimitSum = 0.0; totalRackData.rackBmsDcLimitSum = 0.0;
 
