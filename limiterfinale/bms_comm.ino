@@ -338,12 +338,30 @@ void initCommunication() {
   wm.addParameter(&custom_mqtt_topic);
   wm.addParameter(&custom_mqtt_user);
   wm.addParameter(&custom_mqtt_pass);
+
+  // NEU: Dem WLAN beim Start Zeit geben (vorher brach der erste Versuch nach ~1,3 s ab)
+  wm.setConnectTimeout(20);
+  // NEU: Portal nicht-blockierend, damit der Task dem Watchdog Zeit lassen kann
+  wm.setConfigPortalBlocking(false);
   
   Serial.println(F("Starte WiFiManager AutoConnect..."));
-  if(!wm.autoConnect("BMS-Gateway-Setup")) {
-    delay(3000);
-    ESP.restart();
+  bool connected = wm.autoConnect("BMS-Gateway-Setup");
+
+  // NEU: Falls kein WLAN: Portal bedienen, aber mit Timeout und Neustart.
+  // Die Regelung (Task_Battery auf Core 1) laeuft waehrenddessen unabhaengig weiter.
+  unsigned long portalStart = millis();
+  while (!connected) {
+    wm.process();
+    connected = (WiFi.status() == WL_CONNECTED);
+    if (!connected && (millis() - portalStart > 180000UL)) {   // 3 Minuten
+      Serial.println(F("WLAN: Portal-Timeout, starte neu..."));
+      delay(1000);
+      ESP.restart();
+    }
+    vTaskDelay(pdMS_TO_TICKS(10));
   }
+  // Kurz weiterlaufen lassen, damit die Antwortseite des Portals noch ausgeliefert wird
+  for (int i = 0; i < 100; i++) { wm.process(); vTaskDelay(pdMS_TO_TICKS(10)); }
 
   Serial.println(F("\nWLAN erfolgreich verbunden!"));
   if (MDNS.begin("limiter")) {
