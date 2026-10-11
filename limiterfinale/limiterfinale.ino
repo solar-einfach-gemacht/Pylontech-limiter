@@ -158,18 +158,29 @@ void TaskBatteryLoop(void * pvParameters) {
       }
 
       // ... und erst DANACH ausgeben. So kann ein haengender Serial-Port nie den Mutex blockieren.
+      // NEU: Der ganze Block wird erst in einen Puffer gebaut und in einem Rutsch geschrieben,
+      // damit er nicht mehr mittendrin abgeschnitten wird.
       if (dOk) {
-        Serial.println(F("\n====================================================================="));
-        Serial.println(F("                    RACK MASTER LIVE DETAIL-DIAGNOSE                  "));
-        Serial.println(F("====================================================================="));
-        Serial.printf("Packs konfiguriert: %d | Packs online: %d | System-SOC: %.1f %%\n", maxPacks, dActive, dSoc);
-        Serial.printf("Spannung: %.2f V | Gesamtstrom: %.2f A\n", dVolt, dCur);
-        Serial.printf("Zell-Max: %.3f V | Zell-Min: %.3f V | Delta: %.3f V\n", dMaxC, dMinC, (dMaxC - dMinC));
-        Serial.printf("Hardware-Basis    -> CCL-Max: %.1f A | DCL-Max: %.1f A\n", dHwCc, dHwDc);
-        Serial.printf("Pylontech (0x92)  -> CCL-Live: %.1f A | DCL-Live: %.1f A\n", dBmsCc, dBmsDc);
-        Serial.println(F("---------------------------------------------------------------------"));
-        Serial.printf("CAN OUT AN VICTRON-> CVL: %.1fV | CCL (Geregelt): %.1fA | DCL: %.1fA\n", dCvl, dCcl, dDcl);
-        Serial.println(F("=================================================================\n"));
+        static char diagBuf[900];
+        snprintf(diagBuf, sizeof(diagBuf),
+          "\n=====================================================================\n"
+          "                    RACK MASTER LIVE DETAIL-DIAGNOSE                  \n"
+          "=====================================================================\n"
+          "Packs konfiguriert: %d | Packs online: %d | System-SOC: %.1f %%\n"
+          "Spannung: %.2f V | Gesamtstrom: %.2f A\n"
+          "Zell-Max: %.3f V | Zell-Min: %.3f V | Delta: %.3f V\n"
+          "Hardware-Basis    -> CCL-Max: %.1f A | DCL-Max: %.1f A\n"
+          "Pylontech (0x92)  -> CCL-Live: %.1f A | DCL-Live: %.1f A\n"
+          "---------------------------------------------------------------------\n"
+          "CAN OUT AN VICTRON-> CVL: %.1fV | CCL (Geregelt): %.1fA | DCL: %.1fA\n"
+          "=================================================================\n\n",
+          maxPacks, dActive, dSoc,
+          dVolt, dCur,
+          dMaxC, dMinC, (dMaxC - dMinC),
+          dHwCc, dHwDc,
+          dBmsCc, dBmsDc,
+          dCvl, dCcl, dDcl);
+        Serial.print(diagBuf);
       }
     }
     vTaskDelay(pdMS_TO_TICKS(150)); 
@@ -185,6 +196,7 @@ void TaskCommLoop(void * pvParameters) {
 }
 
 void setup() {
+  Serial.setTxBufferSize(2048);   // NEU: groesserer Sendepuffer, muss VOR Serial.begin() stehen
   Serial.begin(115200);
   Serial.setTxTimeoutMs(0);   // Serial blockiert nie, auch wenn kein Terminal/USB-Kabel mitliest
   delay(1000);
