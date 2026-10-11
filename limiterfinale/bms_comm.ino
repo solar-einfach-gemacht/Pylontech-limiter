@@ -297,6 +297,17 @@ void reconnectMqtt() {
   }
 }
 
+// NEU: Loggt den Grund, warum die WLAN-Verbindung scheitert oder abbricht.
+// Haeufige Reason-Codes: 201 = AP nicht gefunden, 202 = Auth fehlgeschlagen,
+// 15 = 4-Way-Handshake-Timeout, 2 = Auth abgelaufen, 8 = Station hat sich abgemeldet.
+void onWifiEvent(WiFiEvent_t event, WiFiEventInfo_t info) {
+  if (event == ARDUINO_EVENT_WIFI_STA_DISCONNECTED) {
+    Serial.printf("WLAN: Disconnect, Reason = %d\n", info.wifi_sta_disconnected.reason);
+  } else if (event == ARDUINO_EVENT_WIFI_STA_GOT_IP) {
+    Serial.printf("WLAN: IP erhalten: %s\n", WiFi.localIP().toString().c_str());
+  }
+}
+
 void initCommunication() {
   prefs.begin("gateway", true);
   userSettings.maxVoltageLimit = prefs.getFloat("vlimit", 52.2);
@@ -324,6 +335,9 @@ void initCommunication() {
   char pack_str[4];
   snprintf(pack_str, 4, "%d", userSettings.packCount);
 
+  // NEU: Event-Handler VOR dem AutoConnect registrieren, damit der erste Fehlgrund geloggt wird
+  WiFi.onEvent(onWifiEvent);
+
   WiFiManager wm;
   WiFiManagerParameter custom_packs("packs", "Anzahl Akkus (1-16)", pack_str, 3);
   WiFiManagerParameter custom_mqtt_server("server", "MQTT Broker IP", mqtt_server, 40);
@@ -339,20 +353,32 @@ void initCommunication() {
   wm.addParameter(&custom_mqtt_user);
   wm.addParameter(&custom_mqtt_pass);
 
-  // NEU: Dem WLAN beim Start Zeit geben (vorher brach der erste Versuch nach ~1,3 s ab)
+  // Dem WLAN beim Start Zeit geben
   wm.setConnectTimeout(20);
-  // NEU: Portal nicht-blockierend, damit der Task dem Watchdog Zeit lassen kann
+  // Portal nicht-blockierend, damit der Task dem Watchdog Zeit lassen kann
   wm.setConfigPortalBlocking(false);
   
   Serial.println(F("Starte WiFiManager AutoConnect..."));
   bool connected = wm.autoConnect("BMS-Gateway-Setup");
 
-  // NEU: Falls kein WLAN: Portal bedienen, aber mit Timeout und Neustart.
+  // Falls kein WLAN: Portal bedienen, mit Timeout und Neustart.
   // Die Regelung (Task_Battery auf Core 1) laeuft waehrenddessen unabhaengig weiter.
   unsigned long portalStart = millis();
+  // NEU: Zeitpunkt des letzten eigenen Verbindungsversuchs
+  unsigned long lastRetry = millis();
+
   while (!connected) {
     wm.process();
     connected = (WiFi.status() == WL_CONNECTED);
+
+    // NEU: Sind Zugangsdaten gespeichert, alle 15 s selbst neu verbinden.
+    // Der WiFiManager tut das im Portal-Modus nicht von allein.
+    if (!connected && wm.getWiFiIsSaved() && (millis() - lastRetry > 15000UL)) {
+      lastRetry = millis();
+      Serial.println(F("WLAN: Retry mit gespeicherten Daten..."));
+      WiFi.begin();
+    }
+
     if (!connected && (millis() - portalStart > 180000UL)) {   // 3 Minuten
       Serial.println(F("WLAN: Portal-Timeout, starte neu..."));
       delay(1000);
@@ -362,6 +388,13 @@ void initCommunication() {
   }
   // Kurz weiterlaufen lassen, damit die Antwortseite des Portals noch ausgeliefert wird
   for (int i = 0; i < 100; i++) { wm.process(); vTaskDelay(pdMS_TO_TICKS(10)); }
+
+  // NEU: Portal schliessen, falls es durch den eigenen Retry noch offen ist
+  if (wm.getConfigPortalActive()) {
+    wm.stopConfigPortal();
+  }
+  // NEU: WLAN-Energiesparmodus aus, stabilere Verbindung
+  WiFi.setSleep(false);
 
   Serial.println(F("\nWLAN erfolgreich verbunden!"));
   if (MDNS.begin("limiter")) {
